@@ -60,6 +60,19 @@ target_sources(${PROJECT_NAME} PRIVATE
   src/obs-config-helper.h
   src/config-dialog.h
   src/toast-helper.h
+  # Base classes
+  src/stream-output.cpp
+  src/stream-output.h
+  src/output-config.cpp
+  src/output-config.h
+  # RTMP base and outputs
+  src/rtmp-output-config.cpp
+  src/rtmp-output-config.h
+  src/rtmp-output.cpp
+  src/rtmp-output.h
+  # WHIP output
+  src/whip-output-config.cpp
+  src/whip-output-config.h
 )
 
 

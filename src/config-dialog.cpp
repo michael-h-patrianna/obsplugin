@@ -5,8 +5,6 @@
 #include <QMessageBox>
 #include "toast-helper.h"
 
-static constexpr const char *kSec = "demo";
-
 ConfigDialog::ConfigDialog(OBSConfigHelper *cfg, QWidget *parent)
     : QDialog(parent)
     , cfg_(cfg)
@@ -39,9 +37,9 @@ ConfigDialog::ConfigDialog(OBSConfigHelper *cfg, QWidget *parent)
     setLayout(lay);
 
     connect(btnBox->button(QDialogButtonBox::Cancel),
-            &QPushButton::clicked, this, &QDialog::reject);
+            &QPushButton::clicked, this, &ConfigDialog::reject);
     connect(btnBox->button(QDialogButtonBox::Save),
-            &QPushButton::clicked, this, &ConfigDialog::onSave);
+            &QPushButton::clicked, this, &ConfigDialog::accept);
     connect(loadBtn, &QPushButton::clicked, this, &ConfigDialog::onLoad);
 
     loadFromCfg();
@@ -57,23 +55,29 @@ void ConfigDialog::loadFromCfg()
 
 void ConfigDialog::saveToCfg()
 {
-    cfg_->setValue(kSec, "text",   txt_->text(),   QMetaType::QString);
-    cfg_->setValue(kSec, "number", num_->value(),  QMetaType::Int, 0, 9999);
-    cfg_->setValue(kSec, "option", opt_->currentData().toInt(),
-                   QMetaType::Int, 1, 5);
-    cfg_->save();
+    // Use the simple setValue overload (void return type) by calling it directly
+    auto setValue = static_cast<void(OBSConfigHelper::*)(const QString&, const QString&, const QVariant&)>
+        (&OBSConfigHelper::setValue);
+    (cfg_->*setValue)(kSec, "text", txt_->text());
+    (cfg_->*setValue)(kSec, "number", num_->value());
+    (cfg_->*setValue)(kSec, "option", opt_->currentData().toInt());
 }
 
 void ConfigDialog::onLoad()
 {
-    cfg_->load();
     loadFromCfg();
     showToast(this, tr("Config loaded"));    
 }
 
-void ConfigDialog::onSave()
+void ConfigDialog::accept()
 {
     saveToCfg();
-    showToast(this, tr("Config saved"));    
-    accept();
+    QDialog::accept();
 }
+
+void ConfigDialog::reject()
+{
+    loadFromCfg();
+    QDialog::reject();
+}
+

@@ -19,3 +19,4 @@ bool obs_module_load(void);
 
 /// Called by OBS when the module is unloaded.
 void obs_module_unload(void);
+

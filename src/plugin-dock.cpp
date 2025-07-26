@@ -9,10 +9,17 @@
  */
 
 #include "plugin-dock.h"
+#include "plugin-support.h"
+#include "stream-output.h"
 #include <QVBoxLayout>
 #include <QLabel>
-#include "config-dialog.h"
-
+#include <QScrollArea>
+#include <QPalette>
+#include <QColor>
+#include <QFont>
+#include <QFrame>
+#include <obs-frontend-api.h>
+#include <obs-module.h>
 
 /**
  * @brief Constructs the PlayFameDock.
@@ -26,26 +33,8 @@ PlayFameDock::PlayFameDock(OBSConfigHelper *cfg, QWidget *parent)
     , cfg_(cfg)
 {
     setWindowTitle(kDockName);
-    auto *layout = new QVBoxLayout;
-    layout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
-
-    auto *cfgBtn = new QPushButton("Config", this);
-    cfgBtn->setMinimumWidth(120);
-    cfgBtn->setStyleSheet(
-        "QPushButton {"
-        "  padding:6px 14px; border-radius:6px;"
-        "  background:#2d89ef; color:white;"
-        "  font-weight:600;"
-        "}"
-        "QPushButton:hover { background:#368af0; }");
-    layout->addWidget(cfgBtn);
-
-    connect(cfgBtn, &QPushButton::clicked, this, [this]() {
-        ConfigDialog dlg(cfg_, this);
-        dlg.exec();
-    });
-
-    setLayout(layout);
+    setupUI();
+    createOutputs();
 }
 
 /**
@@ -79,3 +68,91 @@ void PlayFameDock::unregisterDock()
 {
     obs_frontend_remove_dock(kDockId);
 }
+
+void PlayFameDock::setupUI()
+{
+    // Apply stylesheet with correct Qt widget selectors
+
+    auto *mainLayout = new QVBoxLayout(this);
+    mainLayout->setSpacing(0);
+    mainLayout->setAlignment(Qt::AlignTop);
+
+    auto *scrollArea = new QScrollArea(this);
+    scrollArea->setWidgetResizable(true);
+    scrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+    
+    auto *scrollWidget = new QWidget(scrollArea);
+    scrollWidget->setContentsMargins(10, 10, 10, 10); // Some padding around dock
+    scrollArea->setWidget(scrollWidget);
+    scrollWidget->setStyleSheet("background-color: #13141A;");
+    
+    outputsLayout_ = new QVBoxLayout(scrollWidget);
+    outputsLayout_->setContentsMargins(0, 0, 0, 0);
+    outputsLayout_->setSpacing(10); // gap: 10px between entries as in HTML
+    outputsLayout_->setAlignment(Qt::AlignTop);
+
+    mainLayout->addWidget(scrollArea);
+}
+
+void PlayFameDock::createOutputs()
+{
+    obs_log(LOG_INFO, "[PlayFameDock] Creating outputs...");
+    
+    // Create outputs in order specified by the design: PlayFame, YouTube, Twitch, Facebook, Kick
+    try {
+        outputs_.emplace_back(std::make_unique<StreamOutput>(cfg_, "PlayFame", "playfame_icon.png", this));
+        obs_log(LOG_INFO, "[PlayFameDock] Created PlayFame output");
+        
+        outputs_.emplace_back(std::make_unique<StreamOutput>(cfg_, "YouTube", "youtube_icon.png", this));
+        obs_log(LOG_INFO, "[PlayFameDock] Created YouTube output");
+        
+        outputs_.emplace_back(std::make_unique<StreamOutput>(cfg_, "Twitch", "twitch_icon.png", this));
+        obs_log(LOG_INFO, "[PlayFameDock] Created Twitch output");
+        
+        outputs_.emplace_back(std::make_unique<StreamOutput>(cfg_, "Facebook", "facebook_icon.png", this));
+        obs_log(LOG_INFO, "[PlayFameDock] Created Facebook output");
+        
+        outputs_.emplace_back(std::make_unique<StreamOutput>(cfg_, "Kick", "kick_icon.png", this));
+        obs_log(LOG_INFO, "[PlayFameDock] Created Kick output");
+    } catch (const std::exception& e) {
+        obs_log(LOG_WARNING, "[PlayFameDock] Error creating outputs: %s", e.what());
+        return;
+    }
+
+    obs_log(LOG_INFO, "[PlayFameDock] Created %zu outputs", outputs_.size());
+
+    // Initialize all outputs
+    for (size_t i = 0; i < outputs_.size(); ++i) {
+        try {
+            outputs_[i]->initialize();
+            obs_log(LOG_INFO, "[PlayFameDock] Initialized output %zu: %s", i, outputs_[i]->serviceName().toUtf8().constData());
+        } catch (const std::exception& e) {
+            obs_log(LOG_WARNING, "[PlayFameDock] Error initializing output %zu: %s", i, e.what());
+        }
+    }
+
+    // Set demo states to match the design: offline, unused, connecting, error, online  
+    if (outputs_.size() >= 5) {
+        obs_log(LOG_INFO, "[PlayFameDock] Setting demo states...");
+        outputs_[0]->setState(OutputState::Offline);    // PlayFame - offline
+        outputs_[1]->setState(OutputState::Unused);     // YouTube - unused  
+        outputs_[2]->setState(OutputState::Connecting); // Twitch - connecting
+        outputs_[3]->setState(OutputState::Error);      // Facebook - error
+        outputs_[4]->setState(OutputState::Online);     // Kick - online
+        obs_log(LOG_INFO, "[PlayFameDock] Demo states set");
+    }
+
+    // Add outputs to layout
+    for (size_t i = 0; i < outputs_.size(); ++i) {
+        try {
+            outputsLayout_->addWidget(outputs_[i].get());
+            obs_log(LOG_INFO, "[PlayFameDock] Added output %zu to layout: %s", i, outputs_[i]->serviceName().toUtf8().constData());
+        } catch (const std::exception& e) {
+            obs_log(LOG_WARNING, "[PlayFameDock] Error adding output %zu to layout: %s", i, e.what());
+        }
+    }
+    
+    obs_log(LOG_INFO, "[PlayFameDock] All outputs created and added to layout");
+}
+

@@ -36,3 +36,4 @@ extern void blogva(int log_level, const char *format, va_list args);
 #ifdef __cplusplus
 }
 #endif
+

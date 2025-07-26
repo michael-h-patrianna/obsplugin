@@ -1,8 +1,16 @@
-// ──────────────────────────────  obs-config-helper.cpp  ───────────────────────────
+/*!
+ * @file obs-config-helper.cpp
+ * @brief Implementation of the OBSConfigHelper class.
+ */
+
 #include "obs-config-helper.h"
-#include <QDebug>
+
+#include "plugin-support.h"
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <util/platform.h>
 #include <QFileInfo>
+#include <obs-module.h>
 
 static inline QString typeNameCompat(QMetaType::Type t)
 {
@@ -34,9 +42,8 @@ OBSConfigHelper::OBSConfigHelper(const char *configFile)
     const QByteArray dirUtf8 = QFileInfo(configFilePath).path().toUtf8();
     os_mkdirs(dirUtf8.constData());                      // util/platform.h
 
-    
     configData = obs_data_create();   // start empty until load() is called
-    qDebug() << "[OBSConfigHelper] Using config file:" << configFilePath;
+    obs_log(LOG_INFO, "[OBSConfigHelper] Using config file: %s", configFilePath.toUtf8().constData());
 }
 
 OBSConfigHelper::~OBSConfigHelper()
@@ -81,7 +88,7 @@ bool OBSConfigHelper::setValue(const QString &section, const QString &key,
     if (!configData)
         return false;
 
-    if (!validate(value, type, min, max))
+    if (type != QMetaType::UnknownType && !validate(value, type, min, max))
         return false;
 
     /* grab (or lazily create) the section object --------------------------- */
@@ -94,7 +101,10 @@ bool OBSConfigHelper::setValue(const QString &section, const QString &key,
     /* --------------------------------------------------------------------- */
     /*  write the key *before* attaching the section to the parent           */
     /* --------------------------------------------------------------------- */
-    switch (type) {
+    QMetaType::Type actualType = type == QMetaType::UnknownType ? 
+        static_cast<QMetaType::Type>(value.typeId()) : type;
+
+    switch (actualType) {
     case QMetaType::Int:      obs_data_set_int   (sectionObj, key.toUtf8().constData(), value.toInt());        break;
     case QMetaType::LongLong: obs_data_set_int   (sectionObj, key.toUtf8().constData(), value.toLongLong());   break;
     case QMetaType::Double:   obs_data_set_double(sectionObj, key.toUtf8().constData(), value.toDouble());     break;
@@ -106,8 +116,8 @@ bool OBSConfigHelper::setValue(const QString &section, const QString &key,
                             value.toByteArray().constData());
         break;
     default:
-        qWarning().nospace() << "[OBSConfigHelper] Unsupported type for "
-                             << key << " -> " << typeNameCompat(type);
+        obs_log(LOG_WARNING, "[OBSConfigHelper] Unsupported type for %s -> %s",
+                key.toUtf8().constData(), typeNameCompat(actualType).toUtf8().constData());
         obs_data_release(sectionObj);
         return false;
     }
@@ -116,7 +126,11 @@ bool OBSConfigHelper::setValue(const QString &section, const QString &key,
     obs_data_set_obj(configData, section.toUtf8().constData(), sectionObj);
     obs_data_release(sectionObj);     // balance our ref
     return true;
+}
 
+void OBSConfigHelper::setValue(const QString &section, const QString &key, const QVariant &value)
+{
+    setValue(section, key, value, QMetaType::UnknownType);
 }
 
 QVariant OBSConfigHelper::getValue(const QString &section, const QString &key,
@@ -148,6 +162,26 @@ QVariant OBSConfigHelper::getValue(const QString &section, const QString &key,
     return out.isValid() ? out : def;
 }
 
+void OBSConfigHelper::loadSection(const QString &section, obs_data_t *data)
+{
+    if (!configData || !data)
+        return;
+
+    obs_data_t *sectionObj = obs_data_get_obj(configData, section.toUtf8().constData());
+    if (sectionObj) {
+        obs_data_apply(data, sectionObj);
+        obs_data_release(sectionObj);
+    }
+}
+
+void OBSConfigHelper::saveSection(const QString &section, obs_data_t *data)
+{
+    if (!configData || !data)
+        return;
+
+    obs_data_set_obj(configData, section.toUtf8().constData(), data);
+}
+
 // -------------------------------------------------------------------------
 //  validate()  –  Qt 6-clean
 // -------------------------------------------------------------------------
@@ -156,15 +190,14 @@ bool OBSConfigHelper::validate(const QVariant &value,
                                const QVariant   &min,
                                const QVariant   &max) const
 {
-    // 1) type check ­–––––––––––––––––––––––––––––––––––––––––––––––––––––
+    // 1) type check –––––––––––––––––––––––––––––––––––––––––––––––––––––
     if (value.metaType().id() != static_cast<int>(type)) {
-        qDebug().nospace() << "Validation failed: type mismatch.  Expected "
-                           << typeNameCompat(type) << ", got "
-                           << value.metaType().name();
+        obs_log(LOG_WARNING, "[OBSConfigHelper] Validation failed: type mismatch.  Expected %s, got %s",
+                typeNameCompat(type).toUtf8().constData(), value.metaType().name());
         return false;
     }
 
-    // 2) numeric types ­––––––––––––––––––––––––––––––––––––––––––––––––––
+    // 2) numeric types ––––––––––––––––––––––––––––––––––––––––––––––––––
     auto isIntLike = [](QMetaType::Type t) {
         return t == QMetaType::Int   || t == QMetaType::Long
             || t == QMetaType::LongLong || t == QMetaType::Short
@@ -198,7 +231,7 @@ bool OBSConfigHelper::validate(const QVariant &value,
         return true;
     }
 
-    // 3) QString ­––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+    // 3) QString –––––––––––––––––––––––––––––––––––––––––––––––––––––––––
     if (type == QMetaType::QString) {
         const QString v = value.toString();
         if (min.isValid() && (!canConvertCompat(min, type) || v < min.toString()))
@@ -208,15 +241,16 @@ bool OBSConfigHelper::validate(const QVariant &value,
         return true;
     }
 
-    // 4) Bool (ranges don’t make sense) ­–––––––––––––––––––––––––––––––––
+    // 4) Bool (ranges don't make sense) –––––––––––––––––––––––––––––––––
     if (type == QMetaType::Bool)
         return true;         // nothing more to validate
 
-    // 5) fallback – unsupported type/min/max combo ­––––––––––––––––––––––
+    // 5) fallback – unsupported type/min/max combo ––––––––––––––––––––––
     if (min.isValid() || max.isValid()) {
-        qWarning() << "OBSConfigHelper::validate(): min/max validation not "
-                      "implemented for" << typeNameCompat(type);
+        obs_log(LOG_WARNING, "[OBSConfigHelper] OBSConfigHelper::validate(): min/max validation not "
+                      "implemented for %s", typeNameCompat(type).toUtf8().constData());
         return false;
     }
     return true;
 }
+

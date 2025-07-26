@@ -13,6 +13,11 @@
 #include <obs-frontend-api.h>
 #include "obs-config-helper.h"
 #include <QWidget>
+#include <QVBoxLayout>
+#include <memory>
+#include <vector>
+
+class StreamOutput;
 
 /**
  * @class PlayFameDock
@@ -38,4 +43,10 @@ private:
     static constexpr const char *kDockName = "PlayFame";
     OBSConfigHelper *cfg_;   
 
+    QVBoxLayout *outputsLayout_{nullptr};
+    std::vector<std::unique_ptr<StreamOutput>> outputs_;
+
+    void setupUI();
+    void createOutputs();
 };
+

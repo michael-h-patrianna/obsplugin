@@ -25,3 +25,4 @@ inline void showToast(QWidget *parent, const QString &msg,
                              msg);
 #endif
 }
+

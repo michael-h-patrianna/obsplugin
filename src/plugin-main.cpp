@@ -1,6 +1,5 @@
 /*
  * PlayFame – OBS Plugin
-
  */
 
 #include "plugin-main.h"
@@ -72,11 +71,11 @@ bool obs_module_load(void)
 {
     obs_log(LOG_INFO, "[playfame] Loading plugin…");
 
-    /* 1 Initialise configuration --------------------------------------- */
+    /* 1 Initialise configuration --------------------------------------- */
     g_plugin_config = new OBSConfigHelper("playfame_config.json");
     g_plugin_config->load();
 
-    /* 2 Create dock in the UI thread ----------------------------------- */
+    /* 2 Create dock in the UI thread ----------------------------------- */
     QWidget *mainWindow =
         static_cast<QWidget *>(obs_frontend_get_main_window());
     if (!mainWindow) {
@@ -97,7 +96,7 @@ bool obs_module_load(void)
         },
         Qt::QueuedConnection);
 
-    /* 3 Listen for EXIT so we can tear the dock down while callbacks stay valid */
+    /* 3 Listen for EXIT so we can tear the dock down while callbacks stay valid */
     obs_frontend_add_event_callback(on_frontend_event, nullptr);
 
     obs_log(LOG_INFO, "[playfame] Plugin loaded successfully");
@@ -127,3 +126,4 @@ void obs_module_unload(void)
 
     obs_log(LOG_INFO, "[playfame] Plugin unloaded");
 }
+
